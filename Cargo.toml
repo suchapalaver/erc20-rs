@@ -1,0 +1,23 @@
+[package]
+name = "erc20-rs"
+version = "0.1.0"
+edition = "2021"
+
+authors = ["Joseph Livesey <joseph@semiotic.ai>"]
+categories = ["finance", "api-bindings"]
+description = "Rust SDK for ERC20"
+homepage = "https://crates.io/crates/erc20-rs"
+keywords = ["defi", "ethereum", "web3", "blockchain", "erc20"]
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/semiotic-ai/erc20-rs"
+
+[dependencies]
+alloy-contract = { version = "0.15.0", default-features = false }
+alloy-network = { version = "0.15.0", default-features = false }
+alloy-primitives = { version = "1.1.0", default-features = false, features = [
+    "std",
+    "rlp",
+] }
+alloy-provider = { version = "0.15.0", default-features = false }
+alloy-sol-types = { version = "1.1.0", features = ["json"] }
