@@ -1,6 +1,6 @@
 [package]
 name = "erc20-rs"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 
 authors = ["Joseph Livesey <joseph@semiotic.ai>"]
@@ -10,7 +10,7 @@ homepage = "https://crates.io/crates/erc20-rs"
 keywords = ["defi", "ethereum", "web3", "blockchain", "erc20"]
 license = "Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/semiotic-ai/erc20-rs"
+repository = "https://github.com/suchapalaver/erc20-rs"
 
 [dependencies]
 alloy-contract = { version = "1.0.3", default-features = false }
