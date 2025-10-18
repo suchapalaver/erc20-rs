@@ -1,8 +1,6 @@
 use alloy_network::Ethereum;
-use alloy_primitives::Address;
-use alloy_primitives::U256;
-use alloy_provider::PendingTransactionBuilder;
-use alloy_provider::Provider;
+use alloy_primitives::{Address, U256};
+use alloy_provider::{PendingTransactionBuilder, Provider};
 use alloy_sol_types::sol;
 
 use crate::ERC20::ERC20Instance;
