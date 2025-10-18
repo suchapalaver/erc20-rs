@@ -13,11 +13,11 @@ readme = "README.md"
 repository = "https://github.com/suchapalaver/erc20-rs"
 
 [dependencies]
-alloy-contract = { version = "1.0.3", default-features = false }
-alloy-network = { version = "1.0.3", default-features = false }
-alloy-primitives = { version = "1.4.0", default-features = false, features = [
+alloy-contract = { version = "1.0.41", default-features = false }
+alloy-network = { version = "1.0.41", default-features = false }
+alloy-primitives = { version = "1.4.1", default-features = false, features = [
     "std",
     "rlp",
 ] }
-alloy-provider = { version = "1.0.3", default-features = false }
-alloy-sol-types = { version = "1.4.0", features = ["json"] }
+alloy-provider = { version = "1.0.41", default-features = false }
+alloy-sol-types = { version = "1.4.1", features = ["json"] }
