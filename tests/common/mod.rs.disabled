@@ -1,0 +1,144 @@
+//! Common test utilities for integration tests with anvil testcontainers.
+
+use alloy_network::EthereumWallet;
+use alloy_primitives::{address, Address};
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_signer_local::PrivateKeySigner;
+use testcontainers_modules::{
+    anvil::AnvilNode,
+    testcontainers::{runners::AsyncRunner, ContainerAsync},
+};
+
+/// Anvil's default port
+pub const ANVIL_PORT: u16 = 8545;
+
+/// Default test account from Anvil (account #0)
+/// Private key: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+pub const ALICE_ADDRESS: Address = address!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266");
+pub const ALICE_PRIVATE_KEY: &str =
+    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+
+/// Second test account from Anvil (account #1)
+/// Private key: 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
+pub const BOB_ADDRESS: Address = address!("70997970C51812dc3A010C7d01b50e0d17dc79C8");
+pub const BOB_PRIVATE_KEY: &str =
+    "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+
+/// USDC contract address on Ethereum mainnet
+pub const ETHEREUM_USDC: Address = address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+
+/// USDC contract address on Arbitrum One
+pub const ARBITRUM_USDC: Address = address!("af88d065e77c8cC2239327C5EDb3A432268e5831");
+
+/// USDC whale address on Ethereum mainnet (has large USDC balance)
+/// This is Circle's USDC contract address which holds USDC
+pub const ETHEREUM_USDC_WHALE: Address = address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+
+/// USDC whale address on Arbitrum (Binance hot wallet)
+pub const ARBITRUM_USDC_WHALE: Address = address!("f89d7b9c864f589bbF53a82105107622B35EaA40");
+
+/// Test setup configuration
+#[derive(Debug, Clone)]
+pub struct TestSetup {
+    pub chain_id: u64,
+    pub usdc_address: Address,
+    pub usdc_whale: Address,
+    pub fork_url: String,
+}
+
+impl TestSetup {
+    /// Ethereum mainnet fork setup
+    pub fn ethereum() -> Self {
+        Self {
+            chain_id: 1,
+            usdc_address: ETHEREUM_USDC,
+            usdc_whale: ETHEREUM_USDC_WHALE,
+            fork_url: std::env::var("ETHEREUM_RPC_URL")
+                .unwrap_or_else(|_| "https://eth.llamarpc.com".to_string()),
+        }
+    }
+
+    /// Arbitrum One fork setup
+    pub fn arbitrum() -> Self {
+        Self {
+            chain_id: 42161,
+            usdc_address: ARBITRUM_USDC,
+            usdc_whale: ARBITRUM_USDC_WHALE,
+            fork_url: std::env::var("ARBITRUM_RPC_URL")
+                .unwrap_or_else(|_| "https://arbitrum.llamarpc.com".to_string()),
+        }
+    }
+}
+
+/// Initialize anvil testcontainer with forked network and return provider
+///
+/// This function:
+/// 1. Starts an anvil container with network fork
+/// 2. Returns the endpoint URL for creating custom providers
+///
+/// Returns: (container, endpoint_url)
+pub async fn initialize_anvil_fork(setup: TestSetup) -> (ContainerAsync<AnvilNode>, String) {
+    // Start anvil container with fork
+    let container = AnvilNode::default()
+        .with_fork_url(&setup.fork_url)
+        .with_chain_id(setup.chain_id)
+        .start()
+        .await
+        .expect("Failed to start anvil container");
+
+    // Get the endpoint
+    let host_port = container
+        .get_host_port_ipv4(ANVIL_PORT)
+        .await
+        .expect("Failed to get anvil port");
+    let endpoint = format!("http://127.0.0.1:{}", host_port);
+
+    (container, endpoint)
+}
+
+/// Create a root provider (no wallet) for raw RPC calls
+pub async fn create_root_provider(endpoint: &str) -> impl Provider {
+    let provider = ProviderBuilder::new().on_http(endpoint.parse().expect("Invalid endpoint URL"));
+
+    // Enable auto-impersonation for flexibility in tests
+    provider
+        .raw_request::<_, ()>(
+            "anvil_autoImpersonateAccount".into(),
+            [serde_json::json!(true)],
+        )
+        .await
+        .expect("Failed to enable auto-impersonation");
+
+    provider
+}
+
+/// Create a provider with a specific signer
+pub fn create_provider_with_signer(endpoint: &str, private_key: &str) -> impl Provider {
+    let signer: PrivateKeySigner = private_key.parse().expect("Invalid private key");
+    let wallet = EthereumWallet::from(signer);
+
+    ProviderBuilder::new()
+        .with_recommended_fillers()
+        .wallet(wallet)
+        .on_http(endpoint.parse().expect("Invalid endpoint URL"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore] // Requires network access
+    async fn test_anvil_fork_setup() {
+        let setup = TestSetup::ethereum();
+        let (_container, endpoint) = initialize_anvil_fork(setup).await;
+
+        // Verify we can connect
+        let provider = create_root_provider(&endpoint).await;
+        let chain_id = provider.get_chain_id().await.unwrap();
+        assert_eq!(chain_id, 1);
+
+        println!("Anvil endpoint: {}", endpoint);
+        println!("Chain ID: {}", chain_id);
+    }
+}

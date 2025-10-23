@@ -1,0 +1,418 @@
+//! Integration tests for EIP-3009 transfer with authorization.
+//!
+//! These tests run against a forked Arbitrum network using testcontainers with Anvil.
+//! They test real USDC contract behavior with EIP-3009 support.
+
+mod common;
+
+use alloy_primitives::{address, Address, U256};
+use alloy_provider::Provider;
+use alloy_rpc_types::TransactionRequest;
+use alloy_signer_local::PrivateKeySigner;
+use common::*;
+use erc20_rs::{
+    signing::{generate_nonce, sign_transfer_authorization_sync},
+    types::TransferAuthorizationParams,
+    Erc20WithEip3009,
+};
+
+/// Test basic transfer with authorization flow
+#[tokio::test]
+#[ignore] // Requires network access and RPC_URL env var
+async fn test_transfer_with_authorization_basic() {
+    // Setup: Fork Arbitrum with USDC
+    let setup = TestSetup::arbitrum();
+    let (_container, endpoint) = initialize_anvil_fork(setup.clone()).await;
+    let root_provider = create_root_provider(&endpoint).await;
+
+    // Create providers for Alice (authorizer) and Bob (recipient)
+    let alice_provider = create_provider_with_signer(&endpoint, ALICE_PRIVATE_KEY);
+    let bob_provider = create_provider_with_signer(&endpoint, BOB_PRIVATE_KEY);
+
+    // Connect to USDC contract
+    let usdc = Erc20WithEip3009::new(setup.usdc_address, alice_provider.clone());
+
+    // Fund Alice with USDC by impersonating a whale
+    let whale = setup.usdc_whale;
+    let amount = U256::from(1_000_000); // 1 USDC (6 decimals)
+
+    // Impersonate whale and transfer USDC to Alice
+    root_provider
+        .raw_request::<_, ()>(
+            "anvil_impersonateAccount".into(),
+            [serde_json::json!(whale)],
+        )
+        .await
+        .expect("Failed to impersonate whale");
+
+    // Fund whale with ETH for gas
+    root_provider
+        .raw_request::<_, ()>(
+            "anvil_setBalance".into(),
+            [
+                serde_json::json!(whale),
+                serde_json::json!("0x1000000000000000000"), // 1 ETH
+            ],
+        )
+        .await
+        .expect("Failed to fund whale");
+
+    // Transfer USDC from whale to Alice using standard transfer
+    let usdc_whale = Erc20WithEip3009::new(setup.usdc_address, root_provider.clone());
+    let tx_request = TransactionRequest::default()
+        .to(setup.usdc_address)
+        .from(whale)
+        .input(
+            // transfer(address,uint256)
+            alloy_primitives::hex::decode(format!(
+                "a9059cbb000000000000000000000000{}{}",
+                alloy_primitives::hex::encode(&ALICE_ADDRESS[..]),
+                format!("{:064x}", amount)
+            ))
+            .unwrap()
+            .into(),
+        );
+
+    root_provider
+        .send_transaction(tx_request)
+        .await
+        .expect("Failed to send transfer")
+        .get_receipt()
+        .await
+        .expect("Failed to get receipt");
+
+    // Verify Alice has USDC
+    let alice_balance = usdc.balance_of(ALICE_ADDRESS).await.unwrap();
+    assert!(alice_balance >= amount, "Alice should have USDC");
+    println!("Alice balance: {}", alice_balance);
+
+    // Get initial Bob balance
+    let bob_initial_balance = usdc.balance_of(BOB_ADDRESS).await.unwrap();
+    println!("Bob initial balance: {}", bob_initial_balance);
+
+    // Create authorization for Alice to send to Bob
+    let transfer_amount = U256::from(500_000); // 0.5 USDC
+    let nonce = generate_nonce();
+    let params = TransferAuthorizationParams::with_duration(
+        ALICE_ADDRESS,
+        BOB_ADDRESS,
+        transfer_amount,
+        3600, // Valid for 1 hour
+        nonce,
+    );
+
+    // Get domain separator
+    let domain_separator = usdc.domain_separator().await.unwrap();
+    println!("Domain separator: {:?}", domain_separator);
+
+    // Alice signs the authorization
+    let alice_signer: PrivateKeySigner = ALICE_PRIVATE_KEY.parse().unwrap();
+    let signature = sign_transfer_authorization_sync(&params, domain_separator, &alice_signer)
+        .expect("Failed to sign");
+
+    println!("Signature: {:?}", signature);
+
+    // Bob (or anyone) submits the authorization
+    let usdc_bob = Erc20WithEip3009::new(setup.usdc_address, bob_provider.clone());
+    let pending_tx = usdc_bob
+        .transfer_with_authorization(
+            params.from,
+            params.to,
+            params.value,
+            params.valid_after,
+            params.valid_before,
+            params.nonce,
+            signature,
+        )
+        .await
+        .expect("Failed to call transfer_with_authorization");
+
+    // Wait for transaction confirmation
+    let receipt = pending_tx
+        .get_receipt()
+        .await
+        .expect("Failed to get receipt");
+
+    assert!(receipt.status(), "Transaction should succeed");
+    println!("Transaction hash: {:?}", receipt.transaction_hash);
+
+    // Verify balances changed
+    let alice_final_balance = usdc.balance_of(ALICE_ADDRESS).await.unwrap();
+    let bob_final_balance = usdc.balance_of(BOB_ADDRESS).await.unwrap();
+
+    assert_eq!(
+        alice_final_balance,
+        alice_balance - transfer_amount,
+        "Alice balance should decrease"
+    );
+    assert_eq!(
+        bob_final_balance,
+        bob_initial_balance + transfer_amount,
+        "Bob balance should increase"
+    );
+
+    println!("Alice final balance: {}", alice_final_balance);
+    println!("Bob final balance: {}", bob_final_balance);
+    println!("✅ Transfer with authorization successful!");
+}
+
+/// Test that authorization cannot be reused (replay protection)
+#[tokio::test]
+#[ignore]
+async fn test_replay_protection() {
+    let setup = TestSetup::arbitrum();
+    let (_container, endpoint) = initialize_anvil_fork(setup.clone()).await;
+    let root_provider = create_root_provider(&endpoint).await;
+
+    let alice_provider = create_provider_with_signer(&endpoint, ALICE_PRIVATE_KEY);
+    let bob_provider = create_provider_with_signer(&endpoint, BOB_PRIVATE_KEY);
+
+    let usdc = Erc20WithEip3009::new(setup.usdc_address, alice_provider.clone());
+
+    // Fund Alice with USDC (similar to previous test)
+    let whale = setup.usdc_whale;
+    let amount = U256::from(1_000_000);
+
+    root_provider
+        .raw_request::<_, ()>(
+            "anvil_impersonateAccount".into(),
+            [serde_json::json!(whale)],
+        )
+        .await
+        .unwrap();
+
+    root_provider
+        .raw_request::<_, ()>(
+            "anvil_setBalance".into(),
+            [
+                serde_json::json!(whale),
+                serde_json::json!("0x1000000000000000000"),
+            ],
+        )
+        .await
+        .unwrap();
+
+    let tx_request = TransactionRequest::default()
+        .to(setup.usdc_address)
+        .from(whale)
+        .input(
+            alloy_primitives::hex::decode(format!(
+                "a9059cbb000000000000000000000000{}{}",
+                alloy_primitives::hex::encode(&ALICE_ADDRESS[..]),
+                format!("{:064x}", amount)
+            ))
+            .unwrap()
+            .into(),
+        );
+
+    root_provider
+        .send_transaction(tx_request)
+        .await
+        .unwrap()
+        .get_receipt()
+        .await
+        .unwrap();
+
+    // Create and sign authorization
+    let transfer_amount = U256::from(100_000);
+    let nonce = generate_nonce();
+    let params = TransferAuthorizationParams::with_duration(
+        ALICE_ADDRESS,
+        BOB_ADDRESS,
+        transfer_amount,
+        3600,
+        nonce,
+    );
+
+    let domain_separator = usdc.domain_separator().await.unwrap();
+    let alice_signer: PrivateKeySigner = ALICE_PRIVATE_KEY.parse().unwrap();
+    let signature = sign_transfer_authorization_sync(&params, domain_separator, &alice_signer)
+        .expect("Failed to sign");
+
+    // First use: should succeed
+    let usdc_bob = Erc20WithEip3009::new(setup.usdc_address, bob_provider.clone());
+    let pending_tx = usdc_bob
+        .transfer_with_authorization(
+            params.from,
+            params.to,
+            params.value,
+            params.valid_after,
+            params.valid_before,
+            params.nonce,
+            signature.clone(),
+        )
+        .await
+        .expect("First authorization should succeed");
+
+    let receipt = pending_tx.get_receipt().await.unwrap();
+    assert!(receipt.status());
+    println!("✅ First use succeeded");
+
+    // Check authorization state
+    let is_used = usdc
+        .authorization_state(ALICE_ADDRESS, nonce)
+        .await
+        .unwrap();
+    assert!(is_used, "Authorization should be marked as used");
+    println!("✅ Authorization marked as used");
+
+    // Second use: should fail (nonce already used)
+    let result = usdc_bob
+        .transfer_with_authorization(
+            params.from,
+            params.to,
+            params.value,
+            params.valid_after,
+            params.valid_before,
+            params.nonce,
+            signature,
+        )
+        .await;
+
+    // The transaction should be sent, but will revert on-chain
+    match result {
+        Ok(pending_tx) => {
+            let receipt = pending_tx.get_receipt().await.unwrap();
+            assert!(!receipt.status(), "Replay transaction should fail (revert)");
+            println!("✅ Replay protection works - transaction reverted");
+        }
+        Err(_) => {
+            println!("✅ Replay protection works - transaction rejected");
+        }
+    }
+}
+
+/// Test authorization cancellation
+#[tokio::test]
+#[ignore]
+async fn test_cancel_authorization() {
+    let setup = TestSetup::arbitrum();
+    let (_container, endpoint) = initialize_anvil_fork(setup.clone()).await;
+    let root_provider = create_root_provider(&endpoint).await;
+
+    let alice_provider = create_provider_with_signer(&endpoint, ALICE_PRIVATE_KEY);
+    let bob_provider = create_provider_with_signer(&endpoint, BOB_PRIVATE_KEY);
+
+    let usdc_alice = Erc20WithEip3009::new(setup.usdc_address, alice_provider.clone());
+    let usdc_bob = Erc20WithEip3009::new(setup.usdc_address, bob_provider.clone());
+
+    // Fund Alice with USDC
+    let whale = setup.usdc_whale;
+    let amount = U256::from(1_000_000);
+
+    root_provider
+        .raw_request::<_, ()>(
+            "anvil_impersonateAccount".into(),
+            [serde_json::json!(whale)],
+        )
+        .await
+        .unwrap();
+
+    root_provider
+        .raw_request::<_, ()>(
+            "anvil_setBalance".into(),
+            [
+                serde_json::json!(whale),
+                serde_json::json!("0x1000000000000000000"),
+            ],
+        )
+        .await
+        .unwrap();
+
+    let tx_request = TransactionRequest::default()
+        .to(setup.usdc_address)
+        .from(whale)
+        .input(
+            alloy_primitives::hex::decode(format!(
+                "a9059cbb000000000000000000000000{}{}",
+                alloy_primitives::hex::encode(&ALICE_ADDRESS[..]),
+                format!("{:064x}", amount)
+            ))
+            .unwrap()
+            .into(),
+        );
+
+    root_provider
+        .send_transaction(tx_request)
+        .await
+        .unwrap()
+        .get_receipt()
+        .await
+        .unwrap();
+
+    // Create authorization
+    let transfer_amount = U256::from(100_000);
+    let nonce = generate_nonce();
+    let params = TransferAuthorizationParams::with_duration(
+        ALICE_ADDRESS,
+        BOB_ADDRESS,
+        transfer_amount,
+        3600,
+        nonce,
+    );
+
+    let domain_separator = usdc_alice.domain_separator().await.unwrap();
+    let alice_signer: PrivateKeySigner = ALICE_PRIVATE_KEY.parse().unwrap();
+    let transfer_signature =
+        sign_transfer_authorization_sync(&params, domain_separator, &alice_signer).unwrap();
+
+    // Verify authorization is not yet used
+    let is_used_before = usdc_alice
+        .authorization_state(ALICE_ADDRESS, nonce)
+        .await
+        .unwrap();
+    assert!(!is_used_before, "Authorization should not be used yet");
+
+    // Alice cancels the authorization
+    use erc20_rs::{signing::sign_cancel_authorization_sync, types::CancelAuthorizationParams};
+
+    let cancel_params = CancelAuthorizationParams::new(ALICE_ADDRESS, nonce);
+    let cancel_signature =
+        sign_cancel_authorization_sync(&cancel_params, domain_separator, &alice_signer).unwrap();
+
+    let pending_cancel = usdc_alice
+        .cancel_authorization(ALICE_ADDRESS, nonce, cancel_signature)
+        .await
+        .expect("Cancel should succeed");
+
+    let receipt = pending_cancel.get_receipt().await.unwrap();
+    assert!(receipt.status());
+    println!("✅ Authorization canceled");
+
+    // Verify authorization is now marked as used
+    let is_used_after = usdc_alice
+        .authorization_state(ALICE_ADDRESS, nonce)
+        .await
+        .unwrap();
+    assert!(
+        is_used_after,
+        "Authorization should be canceled (marked as used)"
+    );
+
+    // Try to use the canceled authorization - should fail
+    let result = usdc_bob
+        .transfer_with_authorization(
+            params.from,
+            params.to,
+            params.value,
+            params.valid_after,
+            params.valid_before,
+            params.nonce,
+            transfer_signature,
+        )
+        .await;
+
+    match result {
+        Ok(pending_tx) => {
+            let receipt = pending_tx.get_receipt().await.unwrap();
+            assert!(
+                !receipt.status(),
+                "Canceled authorization should fail (revert)"
+            );
+            println!("✅ Canceled authorization cannot be used - transaction reverted");
+        }
+        Err(_) => {
+            println!("✅ Canceled authorization cannot be used - transaction rejected");
+        }
+    }
+}

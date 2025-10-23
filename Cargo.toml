@@ -20,4 +20,14 @@ alloy-primitives = { version = "1.4.1", default-features = false, features = [
     "rlp",
 ] }
 alloy-provider = { version = "1.0.41", default-features = false }
+alloy-signer = { version = "1.0.41", default-features = false }
+alloy-signer-local = { version = "1.0.41", default-features = false }
 alloy-sol-types = { version = "1.4.1", features = ["json"] }
+rand = "0.8"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+testcontainers-modules = { version = "0.13", features = ["anvil"] }
+alloy-rpc-types = "1.0.41"
+serde_json = "1.0"
+hex = "0.4"
