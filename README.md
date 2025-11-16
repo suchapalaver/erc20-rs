@@ -9,6 +9,34 @@ Forked from [`alloy-erc20`](https://github.com/leruaa/alloy-erc20) to add write 
 [![Rust Version](https://img.shields.io/badge/rust-2021-blue.svg?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/License-Apache%202.0%20OR%20MIT-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
+## ⚠️ DEPRECATED - Use alloy-erc20-full Instead
+
+This crate (`erc20-rs`) has been **superseded**
+by [`alloy-erc20-full`](<https://crates.io/crates/alloy-erc20-full>).
+
+### Why the Change?
+
+Research showed that the excellent [`alloy-erc20`](<https://github.com/leruaa/alloy-erc20>)
+crate already provides superior read-only ERC20
+functionality with caching,
+BigDecimal support, and TokenStore. However, it
+lacks write operations.
+
+**alloy-erc20-full** is a fork of `alloy-erc20`
+that adds write operation
+support while preserving all of its excellent
+features.
+
+### Migration
+
+See the [Migration Guide](<https://github.com/suchapalaver/erc20-rs/blob/main/MIGRATION_FROM_ERC20_RS.md>).
+
+Links:
+
+- New Crate: <https://crates.io/crates/alloy-erc20-full>
+- Repository: <https://github.com/suchapalaver/erc20-rs> (same repo, different crate)
+- Migration Guide: <https://github.com/suchapalaver/erc20-rs/blob/main/MIGRATION_FROM_ERC20_RS.md>
+
 ## Why alloy-erc20-full?
 
 | Feature | Raw Alloy `sol!` | `alloy-erc20` | `alloy-erc20-full` |
