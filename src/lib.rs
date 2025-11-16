@@ -1,66 +1,35 @@
-use alloy_network::Ethereum;
-use alloy_primitives::{Address, U256};
-use alloy_provider::{PendingTransactionBuilder, Provider};
-use alloy_sol_types::sol;
+#![doc = include_str!("../README.md")]
+#![warn(
+    missing_copy_implementations,
+    missing_debug_implementations,
+    missing_docs,
+    unreachable_pub,
+    clippy::missing_const_for_fn,
+    rustdoc::all
+)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
-use crate::ERC20::ERC20Instance;
+mod constants;
+pub use constants::*;
 
-/// The ERC20 contract.
-#[derive(Clone, Debug)]
-pub struct Erc20<P: Provider<Ethereum>> {
-    instance: ERC20Instance<P>,
-}
+mod provider;
+pub use provider::Erc20ProviderExt;
 
-impl<P: Provider<Ethereum>> Erc20<P> {
-    pub fn new(address: Address, provider: P) -> Self {
-        Self {
-            instance: ERC20Instance::new(address, provider),
-        }
-    }
+mod error;
+pub use error::Error;
 
-    pub async fn balance_of(&self, address: Address) -> Result<U256, alloy_contract::Error> {
-        self.instance.balanceOf(address).call().await
-    }
+mod token;
+pub use token::Token;
 
-    pub async fn allowance(
-        &self,
-        owner: Address,
-        spender: Address,
-    ) -> Result<U256, alloy_contract::Error> {
-        self.instance.allowance(owner, spender).call().await
-    }
+mod lazy_token;
+pub use lazy_token::LazyToken;
 
-    pub async fn decimals(&self) -> Result<u8, alloy_contract::Error> {
-        self.instance.decimals().call().await
-    }
+mod token_id;
+pub use token_id::TokenId;
 
-    pub async fn approve(
-        &self,
-        owner: Address,
-        spender: Address,
-        amount: U256,
-    ) -> Result<PendingTransactionBuilder<Ethereum>, alloy_contract::Error> {
-        self.instance
-            .approve(spender, amount)
-            .from(owner)
-            .send()
-            .await
-    }
+mod stores;
+pub use stores::{BasicTokenStore, Entry, StoreIter, TokenStore};
 
-    pub async fn transfer(
-        &self,
-        from: Address,
-        to: Address,
-        amount: U256,
-    ) -> Result<PendingTransactionBuilder<Ethereum>, alloy_contract::Error> {
-        self.instance.transfer(to, amount).from(from).send().await
-    }
-}
-
-sol!(
-    #[allow(clippy::too_many_arguments)]
-    #[allow(missing_docs)]
-    #[sol(rpc)]
-    ERC20,
-    "abi/erc20.json"
-);
+#[cfg(feature = "lru-store")]
+pub use stores::LruTokenStore;
