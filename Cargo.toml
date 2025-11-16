@@ -2,6 +2,7 @@
 name = "alloy-erc20-full"
 version = "1.0.0"
 edition = "2021"
+rust-version = "1.88.0"
 
 authors = [
     "Joseph Livesey <joseph@semiotic.ai>",
