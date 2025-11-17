@@ -79,7 +79,7 @@ alloy = { version = "1.0", features = ["full"] }
 
 ### Read Operations (Query Token Data)
 
-```rust
+```rust,no_run
 use alloy::primitives::{address, U256};
 use alloy::providers::ProviderBuilder;
 use alloy_erc20_full::LazyToken;
@@ -88,7 +88,7 @@ use alloy_erc20_full::LazyToken;
 async fn main() {
     let rpc_url = "https://eth.llamarpc.com";
     let provider = ProviderBuilder::new()
-        .on_http(rpc_url.parse().unwrap());
+        .connect_http(rpc_url.parse().unwrap());
 
     // Create token instance (DAI)
     let dai = LazyToken::new(
@@ -117,7 +117,7 @@ async fn main() {
 
 **Important:** Provider must be configured with a signer/wallet for write operations.
 
-```rust
+```rust,no_run
 use alloy::network::EthereumWallet;
 use alloy::primitives::{address, U256};
 use alloy::providers::ProviderBuilder;
@@ -132,9 +132,8 @@ async fn main() {
 
     let rpc_url = "https://eth.llamarpc.com";
     let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(wallet)
-        .on_http(rpc_url.parse().unwrap());
+        .connect_http(rpc_url.parse().unwrap());
 
     let dai = LazyToken::new(
         address!("6B175474E89094C44Da98b954EedeAC495271d0F"),
@@ -155,7 +154,7 @@ async fn main() {
         .await
         .unwrap();
 
-    println!("Transfer complete: {:?}", receipt.transaction_hash);
+    println!("Transfer complete: {:?}", receipt);
 
     // Approve spender
     let receipt = dai
@@ -171,14 +170,14 @@ async fn main() {
         .await
         .unwrap();
 
-    println!("Approval complete: {:?}", receipt.transaction_hash);
+    println!("Approval complete: {:?}", receipt);
 
     // Transfer from (using allowance)
     let receipt = dai
         .instance
         .transferFrom(
-            address!("владелец"),
-            address!("получатель"),
+            address!("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045"), // owner
+            address!("742d35Cc6634C0532925a3b844Bc9e7595f0bEb0"), // recipient
             U256::from(1000000000000000000u64),
         )
         .send()
@@ -194,8 +193,14 @@ async fn main() {
 
 ### LazyToken - Cached Token Instance
 
-```rust
+```rust,no_run
 use alloy_erc20_full::LazyToken;
+# use alloy::primitives::Address;
+# use alloy::providers::ProviderBuilder;
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+# let address = Address::ZERO;
+# let provider = ProviderBuilder::new().connect_http("http://localhost:8545".parse()?);
+# let user = Address::ZERO;
 
 // Metadata (name, symbol, decimals) is cached after first query
 let token = LazyToken::new(address, provider);
@@ -209,12 +214,20 @@ let symbol_again = token.symbol().await?; // From cache!
 // Always queries network (not cached)
 let balance = token.balance_of(user).await?;
 let supply = token.total_supply().await?;
+# Ok(())
+# }
 ```
 
 ### Provider Extensions
 
-```rust
+```rust,no_run
 use alloy_erc20_full::Erc20ProviderExt;
+# use alloy::primitives::Address;
+# use alloy::providers::ProviderBuilder;
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+# let provider = ProviderBuilder::new().connect_http("http://localhost:8545".parse()?);
+# let token_address = Address::ZERO;
+# let user_address = Address::ZERO;
 
 // Any Alloy provider automatically gets ERC20 methods
 let token_info = provider.retrieve_token(token_address).await?;
@@ -222,12 +235,18 @@ println!("{} ({})", token_info.symbol, token_info.decimals);
 
 // Get balance as BigDecimal
 let balance = provider.balance_of(token_address, user_address).await?;
+# Ok(())
+# }
 ```
 
 ### TokenStore - Multi-Chain Token Registry
 
-```rust
-use alloy_erc20_full::{BasicTokenStore, Erc20ProviderExt, TokenId};
+```rust,no_run
+use alloy_erc20_full::{BasicTokenStore, Erc20ProviderExt, TokenId, TokenStore};
+# use alloy::primitives::address;
+# use alloy::providers::ProviderBuilder;
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+# let provider = ProviderBuilder::new().connect_http("http://localhost:8545".parse()?);
 
 let mut store = BasicTokenStore::new();
 
@@ -239,6 +258,8 @@ let dai = provider.get_token(
 
 // Later, retrieve from store by symbol or address
 let dai_from_store = store.get(1, TokenId::Symbol("DAI".to_string()));
+# Ok(())
+# }
 ```
 
 ## Architecture
@@ -264,34 +285,44 @@ See [MIGRATION_FROM_ERC20_RS.md](MIGRATION_FROM_ERC20_RS.md) for detailed guide.
 
 **Quick comparison:**
 
-```rust
-// OLD: erc20-rs 0.2.x
-use erc20_rs::Erc20;
-let erc20 = Erc20::new(address, provider);
-let balance = erc20.balance_of(user).await?;
-let tx = erc20.transfer(from, to, amount).await?;
+```rust,no_run
+# use alloy::primitives::{Address, U256};
+# use alloy::providers::ProviderBuilder;
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+# let address = Address::ZERO;
+# let provider = ProviderBuilder::new().connect_http("http://localhost:8545".parse()?);
+# let user = Address::ZERO;
+# let to = Address::ZERO;
+# let amount = U256::ZERO;
+// OLD: erc20-rs 0.2.x (example only - crate doesn't exist)
+// use erc20_rs::Erc20;
+// let erc20 = Erc20::new(address, provider);
+// let balance = erc20.balance_of(user).await?;
+// let tx = erc20.transfer(from, to, amount).await?;
 
 // NEW: alloy-erc20-full 1.0
 use alloy_erc20_full::LazyToken;
 let token = LazyToken::new(address, provider);
 let balance = token.balance_of(user).await?;
 let receipt = token.instance.transfer(to, amount).send().await?.watch().await?;
+# Ok(())
+# }
 ```
 
 ### From `alloy-erc20`
 
 `alloy-erc20-full` is a superset of `alloy-erc20`. All code using `alloy-erc20` works identically:
 
-```rust
-// Just change the crate name in Cargo.toml
-// alloy-erc20 = "1.0"  ← old
-alloy-erc20-full = "1.0"  // ← new
+```text
+Just change the crate name in Cargo.toml:
+  alloy-erc20 = "1.0"       # ← old
+  alloy-erc20-full = "1.0"  # ← new
 
-// And update imports
-// use alloy_erc20::LazyToken;  ← old
-use alloy_erc20_full::LazyToken;  // ← new
+And update imports:
+  use alloy_erc20::LazyToken;       // ← old
+  use alloy_erc20_full::LazyToken;  // ← new
 
-// All existing code works as-is!
+All existing code works as-is!
 ```
 
 **New capability:** Write operations via `.instance` field.
@@ -335,7 +366,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ## Minimum Supported Rust Version (MSRV)
 
-Rust 1.75+
+Rust 1.88+ (required by Alloy 1.1.1)
 
 ## License
 
